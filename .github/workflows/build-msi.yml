@@ -1,0 +1,172 @@
+name: Build Windows MSI Installer
+
+on:
+  workflow_dispatch:
+    inputs:
+      board:
+        description: 'Chromebook Board Codename'
+        required: true
+        default: 'dedede'
+        type: choice
+        options:
+          - 'dedede'
+          - 'octopus'
+          - 'hatch'
+          - 'volteer'
+          - 'brya'
+          - 'nissa'
+          - 'corsola'
+          - 'guybrush'
+          - 'grunt'
+          - 'snappy'
+      firefox_version:
+        description: 'Mozilla Firefox Target Version'
+        required: true
+        default: '140.0'
+        type: choice
+        options:
+          - '140.0'
+          - '139.0'
+          - '128.0esr'
+          - '115.0esr'
+      build_bios:
+        description: 'Include Coreboot / UEFI BIOS Compiler'
+        required: true
+        type: boolean
+        default: true
+      bios_payload:
+        description: 'BIOS Payload'
+        required: true
+        default: 'depthcharge'
+        type: choice
+        options:
+          - 'depthcharge'
+          - 'tianocore'
+          - 'both'
+      gbb_flags:
+        description: 'GBB Flags (e.g. 0x489 for 1s Dev Screen + USB Boot)'
+        required: false
+        default: '0x489'
+        type: string
+      msi_version:
+        description: 'MSI Package Version'
+        required: false
+        default: '1.0.0'
+        type: string
+
+  push:
+    branches:
+      - main
+      - master
+    tags:
+      - 'v*'
+    paths:
+      - 'installer/**'
+      - 'scripts/**'
+      - 'Product.wxs'
+      - 'build-msi.ps1'
+      - '.github/workflows/build-msi.yml'
+
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'installer/**'
+      - 'scripts/**'
+      - 'Product.wxs'
+      - 'build-msi.ps1'
+
+jobs:
+  build-msi:
+    name: Compile WiX MSI Package (${{ github.event.inputs.board || 'dedede' }})
+    runs-on: windows-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Add WiX Toolset to PATH
+        shell: pwsh
+        run: |
+          $wixPath = "${env:ProgramFiles(x86)}\WiX Toolset v3.11\bin"
+          if (Test-Path $wixPath) {
+              Write-Host "Found WiX v3.11 at: $wixPath"
+              "$wixPath" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          } else {
+              Write-Host "WiX v3.11 not found in default location; build-msi.ps1 will download portable binaries."
+          }
+
+      - name: Verify Tools & Environment
+        shell: pwsh
+        run: |
+          Write-Host "PowerShell Version: $($PSVersionTable.PSVersion)"
+          if (Get-Command "candle.exe" -ErrorAction SilentlyContinue) {
+              & candle.exe -? | Select-Object -First 2
+          }
+
+      - name: Compile Windows MSI Installer
+        id: compile
+        shell: pwsh
+        run: |
+          $board = "${{ github.event.inputs.board }}"
+          if ([string]::IsNullOrWhiteSpace($board)) { $board = "dedede" }
+          
+          $firefox = "${{ github.event.inputs.firefox_version }}"
+          if ([string]::IsNullOrWhiteSpace($firefox)) { $firefox = "140.0" }
+          
+          $msiVer = "${{ github.event.inputs.msi_version }}"
+          if ([string]::IsNullOrWhiteSpace($msiVer)) { $msiVer = "1.0.0" }
+
+          $buildBios = "${{ github.event.inputs.build_bios }}"
+          if ([string]::IsNullOrWhiteSpace($buildBios)) { $buildBios = "true" }
+
+          $payload = "${{ github.event.inputs.bios_payload }}"
+          if ([string]::IsNullOrWhiteSpace($payload)) { $payload = "depthcharge" }
+
+          $outputName = "ChromiumOS-Toolkit-Setup-$board.msi"
+
+          Write-Host "Compiling MSI for Board: $board | Firefox: $firefox | Version: $msiVer"
+          
+          # Execute the WiX compilation script
+          .\build-msi.ps1 -Board $board -FirefoxVersion $firefox -MsiVersion $msiVer -OutputFile $outputName
+
+          if (-not (Test-Path $outputName)) {
+              Write-Error "MSI file was not produced: $outputName"
+              exit 1
+          }
+
+          $hash = (Get-FileHash -Algorithm SHA256 $outputName).Hash
+          Write-Host "MSI generated: $outputName" -ForegroundColor Green
+          Write-Host "SHA256: $hash" -ForegroundColor Cyan
+
+          # Save to output
+          "MSI_FILE=$outputName" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "MSI_HASH=$hash" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Generate Checksums Manifest
+        shell: pwsh
+        run: |
+          Get-FileHash -Algorithm SHA256 *.msi | Out-File -FilePath "SHA256SUMS.txt" -Encoding utf8
+          Get-Content "SHA256SUMS.txt"
+
+      - name: Upload MSI Build Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-msi-installer-${{ github.event.inputs.board || 'dedede' }}
+          path: |
+            *.msi
+            SHA256SUMS.txt
+          retention-days: 90
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            *.msi
+            SHA256SUMS.txt
+          generate_release_notes: true
+          draft: false
+          prerelease: false

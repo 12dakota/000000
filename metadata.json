@@ -1,0 +1,6 @@
+{
+  "name": "ChromiumOS Windows Toolkit",
+  "description": "Windows MSI Installer package, PowerShell scripts, WSL2 builder pipeline for ChromeOS with Firefox, and Chromebook Coreboot/UEFI BIOS firmware builder based on 12dakota/Chromeos.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
