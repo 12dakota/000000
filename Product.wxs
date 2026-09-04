@@ -7,8 +7,12 @@
       light.exe -ext WixUIExtension -out ChromiumOS-Toolkit-Setup.msi Product.wixobj
 -->
 <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <?ifndef Board ?>
+  <?define Board = "dedede" ?>
+  <?endif ?>
+
   <Product Id="*"
-           Name="ChromiumOS &amp; Chromebook BIOS Toolkit (dedede)"
+           Name="ChromiumOS &amp; Chromebook BIOS Toolkit ($(var.Board))"
            Language="1033"
            Version="1.0.0"
            Manufacturer="12dakota &amp; Community"
@@ -17,6 +21,7 @@
     <Package InstallerVersion="405"
              Compressed="yes"
              InstallScope="perMachine"
+             Platform="x64"
              Description="Windows Installer for ChromiumOS Builder, Firefox Overlay, USB Flasher and Chromebook BIOS/Coreboot compiler"
              Comments="Installs WSL2 bridge, PowerShell flashing engine, and Coreboot UEFI firmware utilities" />
 
@@ -101,7 +106,7 @@
       </Component>
 
       <Component Id="C_WslLinuxBuilderBash" Guid="719284AF-1982-4DA1-8A19-9182C0349A10">
-        <File Id="F_WslLinuxBuilderBash" Source="wsl-dedede-builder.sh" KeyPath="yes" />
+        <File Id="F_WslLinuxBuilderBash" Source="wsl-$(var.Board)-builder.sh" KeyPath="yes" />
       </Component>
 
       <Component Id="C_WslBiosBuilderBash" Guid="819230AB-D812-49BC-81A0-7128C0A98111">
@@ -121,13 +126,13 @@
                   Name="Flash ChromiumOS USB"
                   Description="Launch Administrator USB Flasher for ChromiumOS"
                   Target="[SystemFolder]WindowsPowerShell\v1.0\powershell.exe"
-                  Arguments="-ExecutionPolicy Bypass -File \"[INSTALLFOLDER]scripts\Flash-ChromiumOS.ps1\""
+                  Arguments="-ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]scripts\Flash-ChromiumOS.ps1&quot;"
                   WorkingDirectory="INSTALLFOLDER" />
         <Shortcut Id="StartMenuBiosShortcut"
                   Name="Flash Chromebook BIOS"
                   Description="Safe BIOS chip flasher with backup and write-protect verification"
                   Target="[SystemFolder]WindowsPowerShell\v1.0\powershell.exe"
-                  Arguments="-ExecutionPolicy Bypass -File \"[INSTALLFOLDER]scripts\Flash-Chromebook-BIOS.ps1\""
+                  Arguments="-ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]scripts\Flash-Chromebook-BIOS.ps1&quot;"
                   WorkingDirectory="INSTALLFOLDER" />
         <RemoveFolder Id="RemoveApplicationProgramsFolder" On="uninstall" />
         <RegistryValue Root="HKCU"

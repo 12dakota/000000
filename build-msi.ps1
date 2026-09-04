@@ -67,20 +67,41 @@ $wixFound = $false
 $candlePath = $null
 $lightPath = $null
 
+$pf86 = ${env:ProgramFiles(x86)}
+if (-not $pf86) { $pf86 = "C:/Program Files (x86)" }
+$pf = $env:ProgramFiles
+if (-not $pf) { $pf = "C:/Program Files" }
+
+$wixCandidates = @(
+    (Join-Path (Join-Path $pf86 'WiX Toolset v3.11') 'bin'),
+    (Join-Path (Join-Path $pf86 'WiX Toolset v3.14') 'bin'),
+    (Join-Path (Join-Path $pf 'WiX Toolset v3.11') 'bin'),
+    (Join-Path (Join-Path $pf 'WiX Toolset v3.14') 'bin')
+)
+
 # Check environment PATH
 if (Get-Command "candle.exe" -ErrorAction SilentlyContinue) {
     $candlePath = "candle.exe"
     $lightPath = "light.exe"
     $wixFound = $true
-} elseif (Test-Path "${env:ProgramFiles(x86)}WiX Toolset v3.11incandle.exe") {
-    $candlePath = "${env:ProgramFiles(x86)}WiX Toolset v3.11incandle.exe"
-    $lightPath = "${env:ProgramFiles(x86)}WiX Toolset v3.11inlight.exe"
-    $wixFound = $true
-} elseif (Get-Command "wix.exe" -ErrorAction SilentlyContinue) {
+} else {
+    foreach ($cand in $wixCandidates) {
+        $cExe = Join-Path $cand "candle.exe"
+        $lExe = Join-Path $cand "light.exe"
+        if ((Test-Path $cExe) -and (Test-Path $lExe)) {
+            $candlePath = $cExe
+            $lightPath = $lExe
+            $wixFound = $true
+            break
+        }
+    }
+}
+
+if (-not $wixFound -and (Get-Command "wix.exe" -ErrorAction SilentlyContinue)) {
     # WiX v4+
     Write-Host "Found WiX v4 (wix.exe). Compiling via 'wix build'..." -ForegroundColor Cyan
-    & wix build -d Board="$Board" -d FirefoxVersion="$FirefoxVersion" Product.wxs -o $OutputFile
-    if ($LASTEXITCODE -eq 0 -and (Test-Path $OutputFile)) {
+    & wix build -d Board="$Board" -d FirefoxVersion="$FirefoxVersion" (Join-Path $WorkDir "Product.wxs") -o (Join-Path $WorkDir $OutputFile)
+    if ($LASTEXITCODE -eq 0 -and (Test-Path (Join-Path $WorkDir $OutputFile))) {
         Write-Host "MSI generated successfully: $OutputFile" -ForegroundColor Green
         exit 0
     }
@@ -113,17 +134,28 @@ if (-not $wixFound) {
 
 # Step 4: Compile Product.wxs into MSI
 Write-Host "[4/4] Compiling Windows Installer Package ($OutputFile)..." -ForegroundColor Green
+
+# Ensure target board Linux worker script exists
+$targetBoardWorker = Join-Path $WorkDir "wsl-$Board-builder.sh"
+if (-not (Test-Path $targetBoardWorker)) {
+    $fallbackWorker = Join-Path $WorkDir "wsl-dedede-builder.sh"
+    if (Test-Path $fallbackWorker) {
+        Write-Host "Creating board worker alias wsl-$Board-builder.sh..." -ForegroundColor DarkGray
+        Copy-Item -Path $fallbackWorker -Destination $targetBoardWorker -Force
+    }
+}
+
 $wixObj = Join-Path $WorkDir "Product.wixobj"
 
 Write-Host "Running candle.exe..." -ForegroundColor DarkGray
-& "$candlePath" -nologo -ext WixUIExtension (Join-Path $WorkDir "Product.wxs") -out $wixObj
+& "$candlePath" -nologo -arch x64 -ext WixUIExtension -dBoard="$Board" -dFirefoxVersion="$FirefoxVersion" (Join-Path $WorkDir "Product.wxs") -out $wixObj
 if ($LASTEXITCODE -ne 0) {
     Write-Error "Candle compilation failed."
     exit 1
 }
 
 Write-Host "Running light.exe to link MSI package..." -ForegroundColor DarkGray
-& "$lightPath" -nologo -ext WixUIExtension -sval -out (Join-Path $WorkDir $OutputFile) $wixObj
+& "$lightPath" -nologo -ext WixUIExtension -sval -b "$WorkDir" -b (Join-Path $WorkDir "scripts") -b (Join-Path $WorkDir "installer") -out (Join-Path $WorkDir $OutputFile) $wixObj
 if ($LASTEXITCODE -ne 0) {
     Write-Error "Light linking failed."
     exit 1

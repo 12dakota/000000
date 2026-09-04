@@ -17,8 +17,12 @@ export function generateWixProductXml(config: ScriptConfig): string {
       light.exe -ext WixUIExtension -out ChromiumOS-Toolkit-Setup.msi Product.wixobj
 -->
 <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <?ifndef Board ?>
+  <?define Board = "${config.board}" ?>
+  <?endif ?>
+
   <Product Id="*"
-           Name="ChromiumOS &amp; Chromebook BIOS Toolkit (${config.board})"
+           Name="ChromiumOS &amp; Chromebook BIOS Toolkit ($(var.Board))"
            Language="1033"
            Version="${version}"
            Manufacturer="12dakota &amp; Community"
@@ -27,6 +31,7 @@ export function generateWixProductXml(config: ScriptConfig): string {
     <Package InstallerVersion="405"
              Compressed="yes"
              InstallScope="perMachine"
+             Platform="x64"
              Description="Windows Installer for ChromiumOS Builder, Firefox Overlay, USB Flasher and Chromebook BIOS/Coreboot compiler"
              Comments="Installs WSL2 bridge, PowerShell flashing engine, and Coreboot UEFI firmware utilities" />
 
@@ -111,7 +116,7 @@ export function generateWixProductXml(config: ScriptConfig): string {
       </Component>
 
       <Component Id="C_WslLinuxBuilderBash" Guid="719284AF-1982-4DA1-8A19-9182C0349A10">
-        <File Id="F_WslLinuxBuilderBash" Source="wsl-${config.board}-builder.sh" KeyPath="yes" />
+        <File Id="F_WslLinuxBuilderBash" Source="wsl-$(var.Board)-builder.sh" KeyPath="yes" />
       </Component>
 
       <Component Id="C_WslBiosBuilderBash" Guid="819230AB-D812-49BC-81A0-7128C0A98111">
@@ -131,13 +136,13 @@ export function generateWixProductXml(config: ScriptConfig): string {
                   Name="Flash ChromiumOS USB"
                   Description="Launch Administrator USB Flasher for ChromiumOS"
                   Target="[SystemFolder]WindowsPowerShell\\v1.0\\powershell.exe"
-                  Arguments="-ExecutionPolicy Bypass -File \\"[INSTALLFOLDER]scripts\\Flash-ChromiumOS.ps1\\""
+                  Arguments="-ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]scripts\\Flash-ChromiumOS.ps1&quot;"
                   WorkingDirectory="INSTALLFOLDER" />
         <Shortcut Id="StartMenuBiosShortcut"
                   Name="Flash Chromebook BIOS"
                   Description="Safe BIOS chip flasher with backup and write-protect verification"
                   Target="[SystemFolder]WindowsPowerShell\\v1.0\\powershell.exe"
-                  Arguments="-ExecutionPolicy Bypass -File \\"[INSTALLFOLDER]scripts\\Flash-Chromebook-BIOS.ps1\\""
+                  Arguments="-ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]scripts\\Flash-Chromebook-BIOS.ps1&quot;"
                   WorkingDirectory="INSTALLFOLDER" />
         <RemoveFolder Id="RemoveApplicationProgramsFolder" On="uninstall" />
         <RegistryValue Root="HKCU"
@@ -267,20 +272,41 @@ $wixFound = $false
 $candlePath = $null
 $lightPath = $null
 
+$pf86 = \${env:ProgramFiles(x86)}
+if (-not $pf86) { $pf86 = "C:/Program Files (x86)" }
+$pf = \$env:ProgramFiles
+if (-not $pf) { $pf = "C:/Program Files" }
+
+$wixCandidates = @(
+    (Join-Path (Join-Path $pf86 'WiX Toolset v3.11') 'bin'),
+    (Join-Path (Join-Path $pf86 'WiX Toolset v3.14') 'bin'),
+    (Join-Path (Join-Path $pf 'WiX Toolset v3.11') 'bin'),
+    (Join-Path (Join-Path $pf 'WiX Toolset v3.14') 'bin')
+)
+
 # Check environment PATH
 if (Get-Command "candle.exe" -ErrorAction SilentlyContinue) {
     $candlePath = "candle.exe"
     $lightPath = "light.exe"
     $wixFound = $true
-} elseif (Test-Path "\${env:ProgramFiles(x86)}\WiX Toolset v3.11\bin\candle.exe") {
-    $candlePath = "\${env:ProgramFiles(x86)}\WiX Toolset v3.11\bin\candle.exe"
-    $lightPath = "\${env:ProgramFiles(x86)}\WiX Toolset v3.11\bin\light.exe"
-    $wixFound = $true
-} elseif (Get-Command "wix.exe" -ErrorAction SilentlyContinue) {
+} else {
+    foreach ($cand in $wixCandidates) {
+        $cExe = Join-Path $cand "candle.exe"
+        $lExe = Join-Path $cand "light.exe"
+        if ((Test-Path $cExe) -and (Test-Path $lExe)) {
+            $candlePath = $cExe
+            $lightPath = $lExe
+            $wixFound = $true
+            break
+        }
+    }
+}
+
+if (-not $wixFound -and (Get-Command "wix.exe" -ErrorAction SilentlyContinue)) {
     # WiX v4+
     Write-Host "Found WiX v4 (wix.exe). Compiling via 'wix build'..." -ForegroundColor Cyan
-    & wix build -d Board="$Board" -d FirefoxVersion="$FirefoxVersion" Product.wxs -o $OutputFile
-    if ($LASTEXITCODE -eq 0 -and (Test-Path $OutputFile)) {
+    & wix build -d Board="$Board" -d FirefoxVersion="$FirefoxVersion" (Join-Path $WorkDir "Product.wxs") -o (Join-Path $WorkDir $OutputFile)
+    if ($LASTEXITCODE -eq 0 -and (Test-Path (Join-Path $WorkDir $OutputFile))) {
         Write-Host "MSI generated successfully: $OutputFile" -ForegroundColor Green
         exit 0
     }
@@ -313,17 +339,28 @@ if (-not $wixFound) {
 
 # Step 4: Compile Product.wxs into MSI
 Write-Host "[4/4] Compiling Windows Installer Package ($OutputFile)..." -ForegroundColor Green
+
+# Ensure target board Linux worker script exists
+$targetBoardWorker = Join-Path $WorkDir "wsl-$Board-builder.sh"
+if (-not (Test-Path $targetBoardWorker)) {
+    $fallbackWorker = Join-Path $WorkDir "wsl-dedede-builder.sh"
+    if (Test-Path $fallbackWorker) {
+        Write-Host "Creating board worker alias wsl-$Board-builder.sh..." -ForegroundColor DarkGray
+        Copy-Item -Path $fallbackWorker -Destination $targetBoardWorker -Force
+    }
+}
+
 $wixObj = Join-Path $WorkDir "Product.wixobj"
 
 Write-Host "Running candle.exe..." -ForegroundColor DarkGray
-& "$candlePath" -nologo -ext WixUIExtension (Join-Path $WorkDir "Product.wxs") -out $wixObj
+& "$candlePath" -nologo -arch x64 -ext WixUIExtension -dBoard="$Board" -dFirefoxVersion="$FirefoxVersion" (Join-Path $WorkDir "Product.wxs") -out $wixObj
 if ($LASTEXITCODE -ne 0) {
     Write-Error "Candle compilation failed."
     exit 1
 }
 
 Write-Host "Running light.exe to link MSI package..." -ForegroundColor DarkGray
-& "$lightPath" -nologo -ext WixUIExtension -sval -out (Join-Path $WorkDir $OutputFile) $wixObj
+& "$lightPath" -nologo -ext WixUIExtension -sval -b "$WorkDir" -b (Join-Path $WorkDir "scripts") -b (Join-Path $WorkDir "installer") -out (Join-Path $WorkDir $OutputFile) $wixObj
 if ($LASTEXITCODE -ne 0) {
     Write-Error "Light linking failed."
     exit 1
