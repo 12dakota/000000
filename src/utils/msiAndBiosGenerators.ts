@@ -1144,6 +1144,11 @@ on:
         required: false
         default: '${config.msiProductVersion || '1.0.0'}'
         type: string
+      release_tag:
+        description: 'GitHub Release Tag (e.g. v1.0.0 or latest)'
+        required: false
+        default: 'v${config.msiProductVersion || '1.0.0'}'
+        type: string
 
   push:
     branches:
@@ -1232,9 +1237,21 @@ jobs:
           Write-Host "MSI generated: $outputName" -ForegroundColor Green
           Write-Host "SHA256: $hash" -ForegroundColor Cyan
 
-          # Save to output
+          # Determine Target Release Tag
+          $tag = "\${{ github.event.inputs.release_tag }}"
+          if ([string]::IsNullOrWhiteSpace($tag)) {
+              if ("\${{ github.ref }}".StartsWith("refs/tags/")) {
+                  $tag = "\${{ github.ref_name }}"
+              } else {
+                  $tag = "v$msiVer"
+              }
+          }
+          Write-Host "Target Release Tag: $tag" -ForegroundColor Cyan
+
+          # Save environment variables for subsequent steps
           "MSI_FILE=$outputName" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           "MSI_HASH=$hash" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "RELEASE_TAG=$tag" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
       - name: Generate Checksums Manifest
         shell: pwsh
@@ -1242,25 +1259,62 @@ jobs:
           Get-FileHash -Algorithm SHA256 *.msi | Out-File -FilePath "SHA256SUMS.txt" -Encoding utf8
           Get-Content "SHA256SUMS.txt"
 
-      - name: Upload MSI Build Artifact
+      - name: Publish Directly to GitHub Releases
+        id: create_release
+        uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: \${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: \${{ env.RELEASE_TAG }}
+          name: ChromiumOS &amp; Chromebook BIOS Toolkit (\${{ env.RELEASE_TAG }})
+          body: |
+            ### 🚀 ChromiumOS &amp; Chromebook BIOS Windows Installer (MSI)
+            
+            Automated production build uploaded directly to GitHub Releases.
+            
+            #### 📦 Release Metadata
+            - **Target Board:** \`\${{ github.event.inputs.board || '${config.board}' }}\`
+            - **Firefox Overlay:** \`\${{ github.event.inputs.firefox_version || '${config.firefoxVersion}' }}\`
+            - **MSI Version:** \`\${{ github.event.inputs.msi_version || '${config.msiProductVersion || '1.0.0'}' }}\`
+            - **Package Filename:** \`\${{ env.MSI_FILE }}\`
+            - **SHA256 Checksum:** \`\${{ env.MSI_HASH }}\`
+            - **Built From Commit:** \`\${{ github.sha }}\`
+            
+            #### ⚡ Installation
+            1. Download the attached **\${{ env.MSI_FILE }}** installer below.
+            2. Run standard or silent installation:
+               \`\`\`cmd
+               msiexec /i \${{ env.MSI_FILE }}
+               \`\`\`
+            3. Access **ChromiumOS Builder** and **BIOS Flasher** directly from your Desktop and Start Menu.
+          files: |
+            *.msi
+            SHA256SUMS.txt
+          generate_release_notes: false
+          draft: false
+          prerelease: false
+          fail_on_unmatched_files: false
+
+      - name: Fallback Release via GitHub CLI
+        if: failure() && env.MSI_FILE != ''
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: \${{ secrets.GITHUB_TOKEN }}
+        run: |
+          Write-Host "Release step failed, running GitHub CLI fallback..." -ForegroundColor Yellow
+          $tag = $env:RELEASE_TAG
+          if (-not $tag) { $tag = "v${config.msiProductVersion || '1.0.0'}" }
+          gh release create $tag --title "ChromiumOS Toolkit MSI ($tag)" --notes "Automated release build for board \${{ github.event.inputs.board || '${config.board}' }}" --clobber *.msi SHA256SUMS.txt
+
+      - name: Upload MSI Build Artifact (Quota Safe)
         uses: actions/upload-artifact@v4
+        continue-on-error: true
         with:
           name: windows-msi-installer-\${{ github.event.inputs.board || '${config.board}' }}
           path: |
             *.msi
             SHA256SUMS.txt
-          retention-days: 90
-
-      - name: Publish GitHub Release
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            *.msi
-            SHA256SUMS.txt
-          generate_release_notes: true
-          draft: false
-          prerelease: false
+          retention-days: 7
 `;
 }
 

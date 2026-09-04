@@ -111,14 +111,15 @@ git push origin v${targetMsiVer}`;
   -f build_bios=${targetBuildBios} \\
   -f bios_payload=${targetPayload} \\
   -f gbb_flags=${targetGbbFlags} \\
-  -f msi_version=${targetMsiVer}`;
+  -f msi_version=${targetMsiVer} \\
+  -f release_tag=v${targetMsiVer}`;
 
   // Generated cURL command for triggering workflow via GitHub REST API
   const curlTrigger = `curl -X POST \\
   -H "Authorization: Bearer YOUR_GITHUB_TOKEN" \\
   -H "Accept: application/vnd.github.v3+json" \\
   https://api.github.com/repos/${repoOwner}/${repoName}/actions/workflows/build-msi.yml/dispatches \\
-  -d '{"ref":"main","inputs":{"board":"${targetBoard}","firefox_version":"${targetFirefox}","build_bios":"${targetBuildBios}","bios_payload":"${targetPayload}","gbb_flags":"${targetGbbFlags}","msi_version":"${targetMsiVer}"}}'`;
+  -d '{"ref":"main","inputs":{"board":"${targetBoard}","firefox_version":"${targetFirefox}","build_bios":"${targetBuildBios}","bios_payload":"${targetPayload}","gbb_flags":"${targetGbbFlags}","msi_version":"${targetMsiVer}","release_tag":"v${targetMsiVer}"}}'`;
 
   // Generated workflow YAML for current board
   const workflowYaml = useMemo(() => {
@@ -390,8 +391,8 @@ git push origin v${targetMsiVer}`;
                   <li>Go to your repo on GitHub &rarr; click the <strong className="text-slate-200">Actions</strong> tab.</li>
                   <li>Click <strong className="text-slate-200">"Build Windows MSI Installer"</strong> in the left sidebar.</li>
                   <li>Click the <strong className="text-slate-200">Run workflow</strong> dropdown on the right.</li>
-                  <li>Select Board (<code className="text-purple-300 font-mono">{targetBoard}</code>), Firefox (<code className="text-purple-300 font-mono">{targetFirefox}</code>) and click <strong className="text-slate-200">Run workflow</strong>.</li>
-                  <li>When completed (~2 mins), download the generated <code className="text-emerald-400 font-mono">windows-msi-installer-{targetBoard}</code> artifact!</li>
+                  <li>Select Board (<code className="text-purple-300 font-mono">{targetBoard}</code>), Firefox (<code className="text-purple-300 font-mono">{targetFirefox}</code>), Release Tag (<code className="text-emerald-400 font-mono">v{targetMsiVer}</code>) and click <strong className="text-slate-200">Run workflow</strong>.</li>
+                  <li>When completed (~2 mins), download the installer directly from your repository's <strong className="text-emerald-400">Releases</strong> page (unlimited quota)!</li>
                 </ol>
               </div>
 
@@ -527,20 +528,32 @@ git push origin v${targetMsiVer}`;
                 }`}>
                   <div className="flex items-center justify-between">
                     <span className="flex items-center gap-2">
-                      {simStep >= 5 ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <div className="w-3.5 h-3.5 rounded-full border border-slate-600" />}
-                      <span>Step 5: Publish Build Artifact (`actions/upload-artifact@v4`)</span>
+                      {simStep > 5 ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : simStep === 5 ? <RefreshCw className="w-3.5 h-3.5 text-purple-400 animate-spin" /> : <div className="w-3.5 h-3.5 rounded-full border border-slate-600" />}
+                      <span>Step 5: Publish Directly to GitHub Releases (`softprops/action-gh-release@v2`)</span>
                     </span>
-                    <span className="text-[10px] text-blue-400">Retained 90d</span>
+                    <span className="text-[10px] text-purple-300 font-bold">Releases Tab</span>
                   </div>
                   {simStep >= 5 && (
-                    <div className="mt-2 p-2.5 rounded bg-emerald-950/40 border border-emerald-500/30 flex items-center justify-between">
-                      <div className="flex items-center gap-2 text-emerald-300 text-xs">
-                        <Package className="w-4 h-4 text-emerald-400" />
-                        <span>ChromiumOS-Toolkit-Setup-{targetBoard}.msi (~4.2 MB)</span>
+                    <div className="mt-2 p-2.5 rounded bg-purple-950/40 border border-purple-500/30 flex items-center justify-between">
+                      <div className="flex items-center gap-2 text-purple-200 text-xs">
+                        <Tag className="w-4 h-4 text-purple-400" />
+                        <span>v{targetMsiVer}: ChromiumOS-Toolkit-Setup-{targetBoard}.msi + SHA256SUMS.txt</span>
                       </div>
-                      <span className="text-[10px] text-emerald-400 font-bold uppercase">Ready</span>
+                      <span className="text-[10px] text-purple-300 font-bold uppercase">Published</span>
                     </div>
                   )}
+                </div>
+
+                <div className={`p-2.5 rounded-lg border text-xs font-mono transition ${
+                  simStep >= 6 ? 'bg-slate-950 border-emerald-500/40 text-slate-200' : 'bg-slate-950/40 border-slate-800/80 text-slate-500'
+                }`}>
+                  <div className="flex items-center justify-between">
+                    <span className="flex items-center gap-2">
+                      {simStep >= 6 ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <div className="w-3.5 h-3.5 rounded-full border border-slate-600" />}
+                      <span>Step 6: Backup Upload Artifact (`continue-on-error: true`)</span>
+                    </span>
+                    <span className="text-[10px] text-emerald-400">Quota Safe</span>
+                  </div>
                 </div>
               </div>
             </div>
